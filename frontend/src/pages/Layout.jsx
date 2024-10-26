@@ -1,24 +1,25 @@
 import { Outlet, Link } from "react-router-dom";
+import { Sidebar, SidebarGroup, SidebarMenu, SidebarMenuItem, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 
 const Layout = () => {
   return (
-    <div className="grid grid-cols-12 h-lvh">
-      <nav className="bg-red-300 h-full">
-        <ul>
-          <li>
+    <SidebarProvider>
+      <Sidebar>
+        <SidebarGroup>
+          <SidebarMenu>
+            <SidebarMenuItem>
             <Link to="/">Home</Link>
-          </li>
-          <li>
-            <Link to="/blogs">Blogs</Link>
-          </li>
-          <li>
-            <Link to="/contact">Contact</Link>
-          </li>
-        </ul>
-      </nav>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarGroup>
+      </Sidebar>
 
-      <Outlet />
-    </div>
+      <main className="grid grid-cols-12 h-lvh w-full">
+        <SidebarTrigger/>
+        <Outlet />
+      </main>
+
+    </SidebarProvider>
   )
 };
 
