@@ -7,8 +7,8 @@ const Layout = () => {
       <Sidebar>
         <SidebarGroup>
           <SidebarMenu>
-            <SidebarMenuItem>
-            <Link to="/">Home</Link>
+            <SidebarMenuItem className=" h-10 font-semibold text-xl">
+              <Link to="/">Minhas encomendas</Link>
             </SidebarMenuItem>
           </SidebarMenu>
         </SidebarGroup>
