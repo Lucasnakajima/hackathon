@@ -11,9 +11,138 @@ class DatabaseHandler:
         self.db = self.client[db_name]
         
         # Coleções
-        self.materiais_collection = self.db["materiais"]  # Renomeado de tecidos para materiais
+        self.materiais_collection = self.db["materiais"]
         self.tipos_roupa_collection = self.db["tipos_roupa"]
         self.encomendas_collection = self.db["encomendas"]
+        
+        # Inicializa dados base
+        self._inicializar_dados()
+
+    def _inicializar_dados(self):
+        """Inicializa os dados base de materiais e tipos de roupa"""
+        self._inserir_materiais_base()
+        self._inserir_tipos_roupa_base()
+
+    def atualiza_estoque_roupa(self, id_tipo, tamanho, nova_quantidade):
+        """
+        Atualiza a quantidade em estoque de uma roupa específica em um tamanho específico.
+        """
+        return self.tipos_roupa_collection.update_one(
+            {"id_tipo": id_tipo},
+            {"$set": {f"materiais_necessarios.tamanhos.{tamanho}.quantidade_estoque": nova_quantidade}}
+        )
+
+    def ajusta_estoque_roupa(self, id_tipo, tamanho, quantidade_ajuste):
+        """
+        Adiciona ou remove uma quantidade do estoque existente.
+        """
+        roupa = self.get_tipo_roupa(id_tipo)
+        if not roupa:
+            return False
+            
+        estoque_atual = roupa["materiais_necessarios"]["tamanhos"][tamanho]["quantidade_estoque"]
+        nova_quantidade = estoque_atual + quantidade_ajuste
+        
+        if nova_quantidade < 0:
+            return False
+            
+        self.atualiza_estoque_roupa(id_tipo, tamanho, nova_quantidade)
+        return True
+
+    def _ajusta_quantidades_por_tamanho(self, quantidade_base, tamanho):
+        """Ajusta as quantidades de material baseado no tamanho"""
+        razoes = {
+            "XS": 0.50,
+            "S": 0.75,
+            "M": 1.00,
+            "L": 1.50,
+            "XL": 2.00
+        }
+        return quantidade_base * razoes[tamanho]
+
+    def _inserir_materiais_base(self):
+        """Insere os materiais base no banco de dados"""
+        materiais = [
+            {
+                "id_material": "TECIDO001",
+                "nome": "Tecido",
+                "quantidade_disponivel": 1000,
+                "preco_por_unidade": 7.00
+            },
+            {
+                "id_material": "ALGODAO001",
+                "nome": "Algodão",
+                "quantidade_disponivel": 800,
+                "preco_por_unidade": 5.50
+            },
+            {
+                "id_material": "FIO001",
+                "nome": "Fio",
+                "quantidade_disponivel": 600,
+                "preco_por_unidade": 4.50
+            },
+            {
+                "id_material": "POLIESTER001",
+                "nome": "Poliéster",
+                "quantidade_disponivel": 400,
+                "preco_por_unidade": 10.00
+            }
+        ]
+
+        for material in materiais:
+            self.insere_material(material)
+
+    def _inserir_tipos_roupa_base(self):
+        """Insere os tipos de roupa base no banco de dados"""
+        tipos_roupa = [
+            self._criar_tipo_roupa(
+                id_tipo="TSHIRT001",
+                nome="T-shirt",
+                materiais_base={
+                    "tecido": 1.00,
+                    "algodao": 0.80,
+                    "fio": 0.40,
+                    "poliester": 1.30
+                },
+                tempo_producao=45
+            ),
+            self._criar_tipo_roupa(
+                id_tipo="CALCOES001",
+                nome="Calções",
+                materiais_base={
+                    "tecido": 0.80,
+                    "algodao": 0.70,
+                    "fio": 0.40,
+                    "poliester": 1.40
+                },
+                tempo_producao=60
+            ),
+            # ... outros tipos podem ser adicionados aqui
+        ]
+
+        for tipo_roupa in tipos_roupa:
+            self.insere_tipo_roupa(tipo_roupa)
+
+    def _criar_tipo_roupa(self, id_tipo, nome, materiais_base, tempo_producao):
+        """Helper para criar um tipo de roupa com todos os tamanhos"""
+        tamanhos = {}
+        estoques_iniciais = {"XS": 50, "S": 45, "M": 40, "L": 35, "XL": 30}
+
+        for tamanho in ["XS", "S", "M", "L", "XL"]:
+            tamanhos[tamanho] = {
+                "quantidade_tecido": self._ajusta_quantidades_por_tamanho(materiais_base["tecido"], tamanho),
+                "quantidade_algodao": self._ajusta_quantidades_por_tamanho(materiais_base["algodao"], tamanho),
+                "quantidade_fio": self._ajusta_quantidades_por_tamanho(materiais_base["fio"], tamanho),
+                "quantidade_poliester": self._ajusta_quantidades_por_tamanho(materiais_base["poliester"], tamanho),
+                "quantidade_estoque": estoques_iniciais[tamanho]
+            }
+
+        return {
+            "id_tipo": id_tipo,
+            "nome": nome,
+            "materiais_necessarios": {"tamanhos": tamanhos},
+            "tempo_producao": tempo_producao
+        }
 
     # Funções para Materiais (renomeadas de Tecidos)
     def insere_material(self, material):
@@ -163,281 +292,40 @@ class DatabaseHandler:
     def close_connection(self):
         self.client.close()
 
-def ajusta_quantidades_por_tamanho(quantidade_base, tamanho):
-    razoes = {
-        "XS": 0.50,
-        "S": 0.75,
-        "M": 1.00,
-        "L": 1.50,
-        "XL": 2.00
-    }
-    return quantidade_base * razoes[tamanho]
+    def get_encomendas_por_cliente_nome(self, nome_cliente):
+        """
+        Retorna todas as encomendas de um cliente específico usando o nome.
+        Usa regex para fazer uma busca case-insensitive e parcial.
+        
+        Parâmetros:
+        - nome_cliente: Nome do cliente (parcial ou completo)
+        
+        Retorna:
+        - Lista de encomendas do cliente
+        """
+        return list(self.encomendas_collection.find({
+            "cliente.nome": {
+                "$regex": nome_cliente,
+                "$options": "i"  # case-insensitive
+            }
+        }).sort("data_criacao", -1))  # ordenado por data, mais recente primeiro
+
+    def get_encomendas_por_cliente_email(self, email_cliente):
+        """
+        Retorna todas as encomendas de um cliente específico usando o email.
+        
+        Parâmetros:
+        - email_cliente: Email exato do cliente
+        
+        Retorna:
+        - Lista de encomendas do cliente
+        """
+        return list(self.encomendas_collection.find({
+            "cliente.email": email_cliente.lower()
+        }).sort("data_criacao", -1))  # ordenado por data, mais recente primeiro
 
 # Exemplo de uso
 if __name__ == "__main__":
     db_handler = DatabaseHandler()
 
-    def atualiza_estoque_roupa(self, id_tipo, tamanho, nova_quantidade):
-        """
-        Atualiza a quantidade em estoque de uma roupa específica em um tamanho específico.
-        
-        Parâmetros:
-        - id_tipo: ID do tipo de roupa (ex: "TSHIRT001")
-        - tamanho: Tamanho da roupa (ex: "XS", "S", "M", "L", "XL")
-        - nova_quantidade: Nova quantidade em estoque
-        
-        Retorna:
-        - Resultado da operação de update
-        """
-        return self.tipos_roupa_collection.update_one(
-            {"id_tipo": id_tipo},
-            {"$set": {f"materiais_necessarios.tamanhos.{tamanho}.quantidade_estoque": nova_quantidade}}
-        )
-
-    def ajusta_estoque_roupa(self, id_tipo, tamanho, quantidade_ajuste):
-        """
-        Adiciona ou remove uma quantidade do estoque existente.
-        Use quantidade positiva para adicionar e negativa para remover.
-        
-        Parâmetros:
-        - id_tipo: ID do tipo de roupa (ex: "TSHIRT001")
-        - tamanho: Tamanho da roupa (ex: "XS", "S", "M", "L", "XL")
-        - quantidade_ajuste: Quantidade a ser adicionada (positivo) ou removida (negativo)
-        
-        Retorna:
-        - True se operação foi bem sucedida
-        - False se não houver estoque suficiente para remoção
-        """
-        # Primeiro, obtém a quantidade atual
-        roupa = self.get_tipo_roupa(id_tipo)
-        if not roupa:
-            return False
-            
-        estoque_atual = roupa["materiais_necessarios"]["tamanhos"][tamanho]["quantidade_estoque"]
-        nova_quantidade = estoque_atual + quantidade_ajuste
-        
-        # Verifica se há estoque suficiente em caso de remoção
-        if nova_quantidade < 0:
-            return False
-            
-        # Atualiza com a nova quantidade
-        self.atualiza_estoque_roupa(id_tipo, tamanho, nova_quantidade)
-        return True
-
-    # Exemplo de inserção de materiais
-    materiais = [
-        {
-            "id_material": "TECIDO001",
-            "nome": "Tecido",
-            "quantidade_disponivel": 1000,  # metros quadrados
-            "preco_por_unidade": 7.00  # €/m²
-        },
-        {
-            "id_material": "ALGODAO001",
-            "nome": "Algodão",
-            "quantidade_disponivel": 800,  # metros cúbicos
-            "preco_por_unidade": 5.50  # €/m³
-        },
-        {
-            "id_material": "FIO001",
-            "nome": "Fio",
-            "quantidade_disponivel": 600,  # metros
-            "preco_por_unidade": 4.50  # €/m
-        },
-        {
-            "id_material": "POLIESTER001",
-            "nome": "Poliéster",
-            "quantidade_disponivel": 400,  # metros quadrados
-            "preco_por_unidade": 10.00  # €/m²
-        }
-    ]
-
-    # Inserindo os materiais
-    for material in materiais:
-        db_handler.insere_material(material)
-
-    # Exemplos de inserção de tipos de roupa com estoque por tamanho
-    tipos_roupa = [
-        {
-            "id_tipo": "TSHIRT001",
-            "nome": "T-shirt",
-            "materiais_necessarios": {
-                "tamanhos": {
-                    "XS": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(1.00, "XS"),  # 0.50
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.80, "XS"),  # 0.40
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.40, "XS"),  # 0.20
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.30, "XS"),  # 0.65
-                        "quantidade_estoque": 50
-                    },
-                    "S": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(1.00, "S"),  # 0.75
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.80, "S"),  # 0.60
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.40, "S"),  # 0.30
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.30, "S"),  # 0.98
-                        "quantidade_estoque": 45
-                    },
-                    "M": {
-                        "quantidade_tecido": 1.00,  # valor base mantido
-                        "quantidade_algodao": 0.80,
-                        "quantidade_fio": 0.40,
-                        "quantidade_poliester": 1.30,
-                        "quantidade_estoque": 40
-                    },
-                    "L": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(1.00, "L"),  # 1.50
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.80, "L"),  # 1.20
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.40, "L"),  # 0.60
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.30, "L"),  # 1.95
-                        "quantidade_estoque": 35
-                    },
-                    "XL": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(1.00, "XL"),  # 2.00
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.80, "XL"),  # 1.60
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.40, "XL"),  # 0.80
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.30, "XL"),  # 2.60
-                        "quantidade_estoque": 30
-                    }
-                }
-            },
-            "tempo_producao": 45
-        },
-        {
-            "id_tipo": "CALCOES001",
-            "nome": "Calções",
-            "materiais_necessarios": {
-                "tamanhos": {
-                    "XS": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(0.80, "XS"),  # 0.40
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.70, "XS"),  # 0.35
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.40, "XS"),  # 0.20
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.40, "XS"),  # 0.70
-                        "quantidade_estoque": 50
-                    },
-                    "S": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(0.80, "S"),  # 0.60
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.70, "S"),  # 0.53
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.40, "S"),  # 0.30
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.40, "S"),  # 1.05
-                        "quantidade_estoque": 45
-                    },
-                    "M": {
-                        "quantidade_tecido": 0.80,  # valor base mantido
-                        "quantidade_algodao": 0.70,
-                        "quantidade_fio": 0.40,
-                        "quantidade_poliester": 1.40,
-                        "quantidade_estoque": 40
-                    },
-                    "L": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(0.80, "L"),  # 1.20
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.70, "L"),  # 1.05
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.40, "L"),  # 0.60
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.40, "L"),  # 2.10
-                        "quantidade_estoque": 35
-                    },
-                    "XL": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(0.80, "XL"),  # 1.60
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.70, "XL"),  # 1.40
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.40, "XL"),  # 0.80
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.40, "XL"),  # 2.80
-                        "quantidade_estoque": 30
-                    }
-                }
-            },
-            "tempo_producao": 60
-        },
-        {
-            "id_tipo": "CAMISOLA001",
-            "nome": "Camisola",
-            "materiais_necessarios": {
-                "tamanhos": {
-                    "XS": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(0.50, "XS"),  # 0.25
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.35, "XS"),  # 0.18
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.50, "XS"),  # 0.25
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.15, "XS"),  # 0.58
-                        "quantidade_estoque": 50
-                    },
-                    "S": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(0.50, "S"),  # 0.38
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.35, "S"),  # 0.26
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.50, "S"),  # 0.38
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.15, "S"),  # 0.86
-                        "quantidade_estoque": 45
-                    },
-                    "M": {
-                        "quantidade_tecido": 0.50,  # valor base mantido
-                        "quantidade_algodao": 0.35,
-                        "quantidade_fio": 0.50,
-                        "quantidade_poliester": 1.15,
-                        "quantidade_estoque": 40
-                    },
-                    "L": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(0.50, "L"),  # 0.75
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.35, "L"),  # 0.53
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.50, "L"),  # 0.75
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.15, "L"),  # 1.73
-                        "quantidade_estoque": 35
-                    },
-                    "XL": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(0.50, "XL"),  # 1.00
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.35, "XL"),  # 0.70
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.50, "XL"),  # 1.00
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.15, "XL"),  # 2.30
-                        "quantidade_estoque": 30
-                    }
-                }
-            },
-            "tempo_producao": 30
-        },
-        {
-            "id_tipo": "CALCAS001",
-            "nome": "Calças",
-            "materiais_necessarios": {
-                "tamanhos": {
-                    "XS": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(1.20, "XS"),  # 0.60
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.95, "XS"),  # 0.48
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.35, "XS"),  # 0.18
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.50, "XS"),  # 0.75
-                        "quantidade_estoque": 50
-                    },
-                    "S": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(1.20, "S"),  # 0.90
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.95, "S"),  # 0.71
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.35, "S"),  # 0.26
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.50, "S"),  # 1.13
-                        "quantidade_estoque": 45
-                    },
-                    "M": {
-                        "quantidade_tecido": 1.20,  # valor base mantido
-                        "quantidade_algodao": 0.95,
-                        "quantidade_fio": 0.35,
-                        "quantidade_poliester": 1.50,
-                        "quantidade_estoque": 40
-                    },
-                    "L": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(1.20, "L"),  # 1.80
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.95, "L"),  # 1.43
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.35, "L"),  # 0.53
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.50, "L"),  # 2.25
-                        "quantidade_estoque": 35
-                    },
-                    "XL": {
-                        "quantidade_tecido": ajusta_quantidades_por_tamanho(1.20, "XL"),  # 2.40
-                        "quantidade_algodao": ajusta_quantidades_por_tamanho(0.95, "XL"),  # 1.90
-                        "quantidade_fio": ajusta_quantidades_por_tamanho(0.35, "XL"),  # 0.70
-                        "quantidade_poliester": ajusta_quantidades_por_tamanho(1.50, "XL"),  # 3.00
-                        "quantidade_estoque": 30
-                    }
-                }
-            },
-            "tempo_producao": 75
-        }
-    ]
-    
-    # Inserindo os tipos de roupa
-    for tipo_roupa in tipos_roupa:
-        db_handler.insere_tipo_roupa(tipo_roupa)
-
-
+    print(db_handler.get_estoque_por_tamanho("TSHIRT001"))
