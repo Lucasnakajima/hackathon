@@ -1,6 +1,6 @@
 from fpdf import FPDF
 from datetime import datetime
-import pandas as pd
+import pandas as pd 
 import re
 import math
 
