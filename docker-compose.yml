@@ -1,26 +1,39 @@
 version: '3.8'
 
+networks:
+  mongo-network:
+    driver: bridge
+
 services:
   mongodb:
     image: mongo:latest
     container_name: mongodb
+    networks:
+      - mongo-network
     restart: always
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: example
+      MONGO_INITDB_ROOT_PASSWORD: root
+      MONGO_INITDB_DATABASE: admin
     ports:
       - 27017:27017
     volumes:
       - mongo_data:/data/db
+    command: mongod --auth
 
   mongo-express:
     image: mongo-express:latest
     container_name: mongo-express
+    networks:
+      - mongo-network
     restart: always
+    depends_on:
+      - mongodb
     environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: root
-      ME_CONFIG_MONGODB_ADMINPASSWORD: example
-      ME_CONFIG_MONGODB_SERVER: mongodb
+      ME_CONFIG_MONGODB_URL: mongodb://root:root@mongodb:27017/admin
+      ME_CONFIG_BASICAUTH_USERNAME: admin
+      ME_CONFIG_BASICAUTH_PASSWORD: pass
+      WAIT_HOSTS: mongodb:27017
     ports:
       - 8081:8081
 
