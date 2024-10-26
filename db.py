@@ -23,32 +23,6 @@ class DatabaseHandler:
         self._inserir_materiais_base()
         self._inserir_tipos_roupa_base()
 
-    def atualiza_estoque_roupa(self, id_tipo, tamanho, nova_quantidade):
-        """
-        Atualiza a quantidade em estoque de uma roupa específica em um tamanho específico.
-        """
-        return self.tipos_roupa_collection.update_one(
-            {"id_tipo": id_tipo},
-            {"$set": {f"materiais_necessarios.tamanhos.{tamanho}.quantidade_estoque": nova_quantidade}}
-        )
-
-    def ajusta_estoque_roupa(self, id_tipo, tamanho, quantidade_ajuste):
-        """
-        Adiciona ou remove uma quantidade do estoque existente.
-        """
-        roupa = self.get_tipo_roupa(id_tipo)
-        if not roupa:
-            return False
-            
-        estoque_atual = roupa["materiais_necessarios"]["tamanhos"][tamanho]["quantidade_estoque"]
-        nova_quantidade = estoque_atual + quantidade_ajuste
-        
-        if nova_quantidade < 0:
-            return False
-            
-        self.atualiza_estoque_roupa(id_tipo, tamanho, nova_quantidade)
-        return True
-
     def _ajusta_quantidades_por_tamanho(self, quantidade_base, tamanho):
         """Ajusta as quantidades de material baseado no tamanho"""
         razoes = {
@@ -66,25 +40,25 @@ class DatabaseHandler:
             {
                 "id_material": "TECIDO001",
                 "nome": "Tecido",
-                "quantidade_disponivel": 1000,
+                "quantidade_disponivel": 2200,
                 "preco_por_unidade": 7.00
             },
             {
                 "id_material": "ALGODAO001",
                 "nome": "Algodão",
-                "quantidade_disponivel": 800,
+                "quantidade_disponivel": 2200,
                 "preco_por_unidade": 5.50
             },
             {
                 "id_material": "FIO001",
                 "nome": "Fio",
-                "quantidade_disponivel": 600,
+                "quantidade_disponivel": 2200,
                 "preco_por_unidade": 4.50
             },
             {
                 "id_material": "POLIESTER001",
                 "nome": "Poliéster",
-                "quantidade_disponivel": 400,
+                "quantidade_disponivel": 2200,
                 "preco_por_unidade": 10.00
             }
         ]
@@ -126,15 +100,13 @@ class DatabaseHandler:
     def _criar_tipo_roupa(self, id_tipo, nome, materiais_base, tempo_producao):
         """Helper para criar um tipo de roupa com todos os tamanhos"""
         tamanhos = {}
-        estoques_iniciais = {"XS": 50, "S": 45, "M": 40, "L": 35, "XL": 30}
-
+        
         for tamanho in ["XS", "S", "M", "L", "XL"]:
             tamanhos[tamanho] = {
                 "quantidade_tecido": self._ajusta_quantidades_por_tamanho(materiais_base["tecido"], tamanho),
                 "quantidade_algodao": self._ajusta_quantidades_por_tamanho(materiais_base["algodao"], tamanho),
                 "quantidade_fio": self._ajusta_quantidades_por_tamanho(materiais_base["fio"], tamanho),
-                "quantidade_poliester": self._ajusta_quantidades_por_tamanho(materiais_base["poliester"], tamanho),
-                "quantidade_estoque": estoques_iniciais[tamanho]
+                "quantidade_poliester": self._ajusta_quantidades_por_tamanho(materiais_base["poliester"], tamanho)
             }
 
         return {
@@ -239,56 +211,6 @@ class DatabaseHandler:
         """Retorna todas as encomendas"""
         return list(self.encomendas_collection.find())
 
-    def get_estoque_total_todos_tipos(self):
-        """
-        Retorna o estoque total de todas as roupas, somando todos os tamanhos.
-        
-        Retorna:
-        - Dict com id_tipo e quantidade total
-        Exemplo: {
-            "TSHIRT001": 200,
-            "CALCAS001": 150,
-            ...
-        }
-        """
-        todos_tipos = self.get_todos_tipos_roupa()
-        estoque_total = {}
-        
-        for tipo in todos_tipos:
-            total = sum(
-                tamanho_info["quantidade_estoque"] 
-                for tamanho_info in tipo["materiais_necessarios"]["tamanhos"].values()
-            )
-            estoque_total[tipo["id_tipo"]] = total
-            
-        return estoque_total
-
-    def get_estoque_por_tamanho(self, id_tipo):
-        """
-        Retorna as quantidades em estoque para cada tamanho de um tipo específico de roupa.
-        
-        Parâmetros:
-        - id_tipo: ID do tipo de roupa (ex: "TSHIRT001")
-        
-        Retorna:
-        - Dict com tamanhos e suas quantidades
-        Exemplo: {
-            "XS": 50,
-            "S": 45,
-            "M": 40,
-            "L": 35,
-            "XL": 30
-        }
-        """
-        tipo_roupa = self.get_tipo_roupa(id_tipo)
-        if not tipo_roupa:
-            return None
-            
-        return {
-            tamanho: info["quantidade_estoque"]
-            for tamanho, info in tipo_roupa["materiais_necessarios"]["tamanhos"].items()
-        }
-
     def close_connection(self):
         self.client.close()
 
@@ -324,8 +246,144 @@ class DatabaseHandler:
             "cliente.email": email_cliente.lower()
         }).sort("data_criacao", -1))  # ordenado por data, mais recente primeiro
 
+    def verifica_disponibilidade_material(self, id_material, quantidade_necessaria):
+        """
+        Verifica se há quantidade suficiente de um material disponível
+        
+        Retorna:
+        - True se houver material suficiente
+        - False se não houver
+        """
+        material = self.get_material(id_material)
+        if not material:
+            return False
+        return material["quantidade_disponivel"] >= quantidade_necessaria
+
+    def ajusta_estoque_material(self, id_material, quantidade_ajuste):
+        """
+        Adiciona ou remove uma quantidade do estoque de material.
+        Use quantidade positiva para adicionar e negativa para remover.
+        
+        Retorna:
+        - True se operação foi bem sucedida
+        - False se não houver estoque suficiente para remoção
+        """
+        material = self.get_material(id_material)
+        if not material:
+            return False
+            
+        nova_quantidade = material["quantidade_disponivel"] + quantidade_ajuste
+        
+        if nova_quantidade < 0:
+            return False
+            
+        self.atualiza_material(id_material, {"quantidade_disponivel": nova_quantidade})
+        return True
+
+    def calcula_materiais_necessarios(self, id_tipo, tamanho, quantidade=1):
+        """
+        Calcula a quantidade de materiais necessários para produzir uma quantidade
+        específica de um tipo de roupa em um tamanho específico.
+        
+        Retorna:
+        - Dict com as quantidades necessárias de cada material
+        - None se o tipo de roupa não existir
+        """
+        tipo_roupa = self.get_tipo_roupa(id_tipo)
+        if not tipo_roupa:
+            return None
+            
+        materiais_tamanho = tipo_roupa["materiais_necessarios"]["tamanhos"][tamanho]
+        return {
+            "TECIDO001": materiais_tamanho["quantidade_tecido"] * quantidade,
+            "ALGODAO001": materiais_tamanho["quantidade_algodao"] * quantidade,
+            "FIO001": materiais_tamanho["quantidade_fio"] * quantidade,
+            "POLIESTER001": materiais_tamanho["quantidade_poliester"] * quantidade
+        }
+
+    def verifica_disponibilidade_producao(self, id_tipo, tamanho, quantidade=1):
+        """
+        Verifica se há materiais suficientes para produzir uma quantidade
+        específica de um tipo de roupa.
+        
+        Retorna:
+        - Dict com status de disponibilidade de cada material
+        - None se o tipo de roupa não existir
+        """
+        materiais_necessarios = self.calcula_materiais_necessarios(id_tipo, tamanho, quantidade)
+        if not materiais_necessarios:
+            return None
+            
+        disponibilidade = {}
+        for id_material, qtd_necessaria in materiais_necessarios.items():
+            disponibilidade[id_material] = self.verifica_disponibilidade_material(
+                id_material, 
+                qtd_necessaria
+            )
+            
+        return disponibilidade
+
+    def processa_producao(self, id_tipo, tamanho, quantidade=1):
+        """
+        Processa a produção de uma roupa, consumindo os materiais necessários.
+        
+        Retorna:
+        - True se a produção foi bem sucedida
+        - False se não há materiais suficientes
+        """
+        # Verifica disponibilidade
+        disponibilidade = self.verifica_disponibilidade_producao(id_tipo, tamanho, quantidade)
+        if not disponibilidade or False in disponibilidade.values():
+            return False
+            
+        # Calcula materiais necessários
+        materiais_necessarios = self.calcula_materiais_necessarios(id_tipo, tamanho, quantidade)
+        
+        # Consome os materiais
+        for id_material, qtd_necessaria in materiais_necessarios.items():
+            if not self.ajusta_estoque_material(id_material, -qtd_necessaria):
+                return False
+                
+        return True
+
+    def get_quantidade_material(self, id_material):
+        """
+        Retorna a quantidade disponível de um material específico.
+        
+        Parâmetros:
+        - id_material: ID do material (ex: "TECIDO001")
+        
+        Retorna:
+        - float: quantidade disponível do material
+        - None: se o material não for encontrado
+        """
+        material = self.get_material(id_material)
+        if not material:
+            return None
+        return material["quantidade_disponivel"]
+
+    def get_quantidade_todos_materiais(self):
+        """
+        Retorna as quantidades disponíveis de todos os materiais.
+        
+        Retorna:
+        - Dict com id_material e quantidade disponível
+        Exemplo: {
+            "TECIDO001": 1000.0,
+            "ALGODAO001": 800.0,
+            "FIO001": 600.0,
+            "POLIESTER001": 400.0
+        }
+        """
+        materiais = self.get_todos_materiais()
+        return {
+            material["id_material"]: material["quantidade_disponivel"]
+            for material in materiais
+        }
+
 # Exemplo de uso
 if __name__ == "__main__":
     db_handler = DatabaseHandler()
 
-    print(db_handler.get_estoque_por_tamanho("TSHIRT001"))
+    print(db_handler.get_quantidade_todos_materiais())
+
