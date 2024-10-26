@@ -1,13 +1,11 @@
 from pymongo import MongoClient
+import os
 
 class DatabaseHandler:
     def __init__(self, db_name="scitech"):
         # Configuração da conexão
-        usuario = "root"
-        senha = "root"
-        self.client = MongoClient(
-            f"mongodb://{usuario}:{senha}@localhost:27017/?authMechanism=DEFAULT&authSource=admin"
-        )
+        mongodb_url = os.getenv('MONGODB_URL', 'mongodb://root:root@mongodb:27017/')
+        self.client = MongoClient(mongodb_url)
         self.db = self.client[db_name]
         
         # Coleções
@@ -386,4 +384,3 @@ if __name__ == "__main__":
     db_handler = DatabaseHandler()
 
     print(db_handler.get_quantidade_todos_materiais())
-

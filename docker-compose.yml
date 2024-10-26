@@ -1,7 +1,7 @@
 version: '3.8'
 
 networks:
-  mongo-network:
+  app-network:
     driver: bridge
 
 services:
@@ -9,7 +9,7 @@ services:
     image: mongo:latest
     container_name: mongodb
     networks:
-      - mongo-network
+      - app-network
     restart: always
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
@@ -20,22 +20,47 @@ services:
     volumes:
       - mongo_data:/data/db
     command: mongod --auth
+    healthcheck:
+      test: echo 'db.runCommand("ping").ok' | mongosh localhost:27017/test --quiet
+      interval: 10s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
   mongo-express:
     image: mongo-express:latest
     container_name: mongo-express
     networks:
-      - mongo-network
+      - app-network
     restart: always
     depends_on:
-      - mongodb
+      mongodb:
+        condition: service_healthy
     environment:
       ME_CONFIG_MONGODB_URL: mongodb://root:root@mongodb:27017/admin
       ME_CONFIG_BASICAUTH_USERNAME: admin
       ME_CONFIG_BASICAUTH_PASSWORD: pass
-      WAIT_HOSTS: mongodb:27017
     ports:
       - 8081:8081
+
+  api:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: scitech-api
+    networks:
+      - app-network
+    restart: always
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    environment:
+      MONGODB_URL: mongodb://root:root@mongodb:27017/
+      MONGODB_DB: scitech
+    ports:
+      - 8000:8000
+    volumes:
+      - .:/app
 
 volumes:
   mongo_data:
