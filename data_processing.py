@@ -65,11 +65,13 @@ def check_reorder_point(orders, stock, day, reorder_point, pending_orders):
         for material, amount in pending_orders.pop(day).items():
             stock[material] += amount
             print(f"Delivered {amount} of {material} to stock on day {day}. Current stock after delivery: {stock[material]}")
+
     
     # Verificar se o ponto de encomenda foi atingido para cada material
     for material, required in materials_acc.items():
+        
         # Calcular estoque efetivo após considerar a demanda do dia
-        effective_stock = stock[material] - required  
+        effective_stock = stock[material] - required
         
         # Verificar necessidade de reorder apenas se o estoque efetivo está abaixo do ponto de encomenda
         if effective_stock <= reorder_point:
@@ -84,14 +86,15 @@ def check_reorder_point(orders, stock, day, reorder_point, pending_orders):
                 print(f"Order placed for {eoq} units of {material}, arriving on day {delivery_day}")
 
     # Atualizar o estoque subtraindo a quantidade necessária para o dia
-    for material, used in materials_acc.items():
+    today_materials = calculate_materials_needed(orders[-1])
+    for material, amount in today_materials.items():
+        today_materials[material] += amount
+            
+    for material, used in today_materials.items():
         stock[material] -= used  # subtrai apenas o necessário para o dia
         print(f"Stock of {material} after using {used} units for day {day}: {stock[material]}")
     
     return stock
-
-
-
 
 
 # Main function to process each order file and track stock
